@@ -2,27 +2,37 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const Redis = require('ioredis');
 
+// --- CONFIGURATION ---
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
-// Connect to the Cloud Database
 const redis = new Redis(process.env.REDIS_URL);
 
-// --- DB HELPER FUNCTIONS ---
-// We use "keys" in Redis like: "user:12345"
-// The value will be a JSON string: '{"role":"spoonie", "partnerId":"6789"}'
+// --- DATABASE HELPERS ---
+// Keys are stored as "user:12345"
+// Values are JSON strings: '{"role":"spoonie", "partnerId":"6789"}'
 
 async function getUser(id) {
-    const data = await redis.get(`user:${id}`);
-    return data ? JSON.parse(data) : null;
+    try {
+        const data = await redis.get(`user:${id}`);
+        return data ? JSON.parse(data) : null;
+    } catch (err) {
+        console.error("Redis Get Error:", err);
+        return null;
+    }
 }
 
 async function saveUser(id, newData) {
-    const current = await getUser(id) || {};
-    const updated = { ...current, ...newData };
-    await redis.set(`user:${id}`, JSON.stringify(updated));
+    try {
+        const current = await getUser(id) || {};
+        const updated = { ...current, ...newData };
+        await redis.set(`user:${id}`, JSON.stringify(updated));
+    } catch (err) {
+        console.error("Redis Save Error:", err);
+    }
 }
 
 // --- MENUS ---
+
+// 1. The Spoonie Menu (Energy Management)
 const spoonieMenu = Markup.inlineKeyboard([
     [Markup.button.callback('🟢 Good Energy', 'status_green')],
     [Markup.button.callback('🟡 Resting / Low', 'status_yellow')],
@@ -30,10 +40,11 @@ const spoonieMenu = Markup.inlineKeyboard([
     [Markup.button.callback('🌙 Dark Room', 'mode_dark'), Markup.button.callback('❤️ Send Heart', 'send_heart')]
 ]);
 
+// 2. The Supporter Menu (Connection & Nudges)
 const supporterMenu = Markup.inlineKeyboard([
-    [Markup.button.callback('❤️ Send Love', 'send_heart')],
-    [Markup.button.callback('🫂 Sending Gentle Hugs', 'send_hug')],
-    [Markup.button.callback('❓ Request Check-in (Softly)', 'req_checkin')]
+    [Markup.button.callback('❤️ Thinking of You', 'send_heart'), Markup.button.callback('🫂 Big Hug', 'send_hug')],
+    [Markup.button.callback('☀️ Good Morning', 'send_morning'), Markup.button.callback('🌙 Good Night', 'send_night')],
+    [Markup.button.callback('❓ Gentle Status Check', 'req_checkin')]
 ]);
 
 // --- ONBOARDING FLOW ---
@@ -53,7 +64,6 @@ bot.start(async (ctx) => {
 
     // CASE B: User is joining via Magic Link
     if (payload && payload !== userId) {
-        // check if the inviter exists
         const inviter = await getUser(payload);
 
         if (inviter) {
@@ -84,7 +94,6 @@ bot.start(async (ctx) => {
 });
 
 // --- ROLE HANDLERS ---
-// These functions are now async because we must save to Redis
 
 bot.action('set_role_spoonie', async (ctx) => {
     const userId = ctx.from.id.toString();
@@ -103,7 +112,6 @@ function sendInviteLink(ctx) {
     const botUsername = ctx.botInfo.username;
     const link = `https://t.me/${botUsername}?start=${userId}`;
 
-    // We use editMessageText so we don't spam the chat history
     ctx.editMessageText(
         `Got it! 🌙\n\nNow, send this Magic Link to your partner.\n` +
         `When they click it, they will be automatically set up.\n\n` +
@@ -113,17 +121,16 @@ function sendInviteLink(ctx) {
 
 // --- COMMUNICATION LOGIC ---
 
-const notifyPartner = async (ctx, message) => {
+// Helper: Sends a message to the partner
+const notifyPartner = async (ctx, message, extraOptions = {}) => {
     const userId = ctx.from.id.toString();
-
-    // Fetch fresh data from Redis
     const user = await getUser(userId);
 
     if (!user || !user.partnerId) {
         return ctx.reply("⚠️ You aren't connected yet. Type /start to get your link.");
     }
 
-    bot.telegram.sendMessage(user.partnerId, message)
+    bot.telegram.sendMessage(user.partnerId, message, { parse_mode: 'Markdown', ...extraOptions })
         .then(() => ctx.answerCbQuery("Sent! 🌙"))
         .catch((err) => {
             console.error(err);
@@ -131,19 +138,44 @@ const notifyPartner = async (ctx, message) => {
         });
 };
 
-// Spoonie Actions
-bot.action('status_green', (ctx) => notifyPartner(ctx, "🟢 Energy Update: Feeling good! Ready to chat."));
-bot.action('status_yellow', (ctx) => notifyPartner(ctx, "🟡 Energy Update: Resting. Low interaction only."));
-bot.action('status_red', (ctx) => notifyPartner(ctx, "🔴 Energy Update: In a Crash/PEM. No screens. I will reach out when I can."));
-bot.action('mode_dark', (ctx) => notifyPartner(ctx, "🌙 Dark Room Mode: Please send voice notes only."));
+// --- SPOONIE ACTIONS ---
+bot.action('status_green', (ctx) => notifyPartner(ctx, "🟢 *Energy Update:* \nFeeling good! Ready to chat."));
+bot.action('status_yellow', (ctx) => notifyPartner(ctx, "🟡 *Energy Update:* \nResting. Low interaction only."));
+bot.action('status_red', (ctx) => notifyPartner(ctx, "🔴 *Energy Update:* \nIn a Crash/PEM. No screens. I will reach out when I can."));
+bot.action('mode_dark', (ctx) => notifyPartner(ctx, "🌙 *Dark Room Mode:* \nLight sensitive. Please send voice notes only."));
 
-// Supporter Actions
-bot.action('send_heart', (ctx) => notifyPartner(ctx, "❤️ Thinking of you."));
-bot.action('send_hug', (ctx) => notifyPartner(ctx, "🫂 Sending you a gentle hug."));
-bot.action('req_checkin', (ctx) => notifyPartner(ctx, "Thinking of you. No pressure, but if you have energy for a tap, let me know how you are. ❤️"));
+// --- SUPPORTER ACTIONS ---
+bot.action('send_heart', (ctx) => notifyPartner(ctx, "❤️ *Thinking of you.* (No reply needed)"));
+bot.action('send_hug', (ctx) => notifyPartner(ctx, "🫂 *Sending you a warm, gentle hug.*"));
+bot.action('send_morning', (ctx) => notifyPartner(ctx, "☀️ *Good morning my love.* I hope you rested well."));
+bot.action('send_night', (ctx) => notifyPartner(ctx, "🌙 *Good night.* Sleep well and recharge."));
 
-bot.launch();
-console.log("Moonbeam (Pro/Redis) is running...");
+// The "Smart Check-in"
+bot.action('req_checkin', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const user = await getUser(userId);
+
+    if (!user || !user.partnerId) {
+        return ctx.reply("⚠️ Not connected yet.");
+    }
+
+    ctx.answerCbQuery("Check-in sent! 🌙");
+
+    // Send message to partner WITH the buttons attached
+    bot.telegram.sendMessage(
+        user.partnerId,
+        "❓ *Gentle Check-in:* \nHow is your energy envelope right now? \n(Tap below when you can)",
+        {
+            parse_mode: 'Markdown',
+            ...spoonieMenu
+        }
+    ).catch(err => console.log("Failed to reach partner", err));
+});
+
+// --- STARTUP ---
+bot.launch().then(() => {
+    console.log("Moonbeam (Pro/Redis) is running...");
+});
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
