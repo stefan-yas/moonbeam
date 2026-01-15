@@ -74,8 +74,14 @@ bot.start(async (ctx) => {
             await saveUser(userId, { role: myRole, partnerId: payload });
             await saveUser(payload, { partnerId: userId });
 
-            // Notify Inviter
-            bot.telegram.sendMessage(payload, "✨ Your partner has connected! You are linked.");
+            // Notify Inviter (Updated to include the Menu!)
+            const inviterMenu = (inviter.role === 'spoonie') ? spoonieMenu : supporterMenu;
+
+            bot.telegram.sendMessage(
+                payload,
+                "✨ Your partner has connected! You are linked.\n\nHere is your menu:",
+                inviterMenu
+            );
 
             // Show Joiner their menu
             const menu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
