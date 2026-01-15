@@ -45,22 +45,22 @@ const supporterMenu = Markup.inlineKeyboard([
 
 bot.start(async (ctx) => {
     const userId = ctx.from.id.toString();
-    const firstName = ctx.from.first_name || 'Partner'; // Capture the name
+    const firstName = ctx.from.first_name || 'Partner';
     const payload = ctx.startPayload;
 
-    // Always update the name in the DB just in case it changed
+    // Always update name
     await saveUser(userId, { firstName });
 
     // 1. Get current user data
     const user = await getUser(userId);
 
-    // CASE A: User is already registered & paired
+    // CASE A: User is already registered & paired -> Show Menu
     if (user && user.partnerId) {
         const menu = user.role === 'spoonie' ? spoonieMenu : supporterMenu;
         return ctx.reply(`Welcome back, ${user.firstName}. 🌙`, menu);
     }
 
-    // CASE B: User is joining via Magic Link
+    // CASE B: User is joining via Magic Link (The "Joiner")
     if (payload && payload !== userId) {
         const inviter = await getUser(payload);
 
@@ -69,23 +69,23 @@ bot.start(async (ctx) => {
 
             // Link them in Redis
             await saveUser(userId, { role: myRole, partnerId: payload, firstName });
-            await saveUser(payload, { partnerId: userId }); // Update inviter link
+            await saveUser(payload, { partnerId: userId });
 
-            // Notify Inviter (The Partner) that YOU joined
+            // 1. Notify the INVITER (The one waiting) + Show THEM the menu now
             const inviterMenu = (inviter.role === 'spoonie') ? spoonieMenu : supporterMenu;
             bot.telegram.sendMessage(
                 payload,
-                `✨ *${firstName}* has connected! You are linked.\n\nHere is your menu:`,
+                `✨ *${firstName}* has connected! You are linked.\n\nHere is your control panel:`,
                 { parse_mode: 'Markdown', ...inviterMenu }
             );
 
-            // Show Joiner (You) the menu
+            // 2. Notify the JOINER (You) + Show YOUR menu
             const menu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
             return ctx.reply(`✨ Connected! You are now linked to *${inviter.firstName}*.\n\nHere are your controls:`, { parse_mode: 'Markdown', ...menu });
         }
     }
 
-    // CASE C: New User (Initiator)
+    // CASE C: New User (The "Initiator") -> Ask Role
     ctx.reply(
         `Hi ${firstName}, welcome to Moonbeam. 🌙\n\nTo tailor the experience, please tell me: \nDo you live with ME/CFS, or are you the supporter?`,
         Markup.inlineKeyboard([
@@ -114,17 +114,14 @@ async function sendInviteLink(ctx) {
     const botUsername = ctx.botInfo.username;
     const link = `https://t.me/${botUsername}?start=${userId}`;
 
-    // Get role to show the preview menu immediately
-    const user = await getUser(userId);
-    const menu = user.role === 'spoonie' ? spoonieMenu : supporterMenu;
+    // NO MENU HERE. We just give instructions.
+    // The menu arrives automatically when the partner joins (see CASE B above).
 
     await ctx.editMessageText(
         `Got it! 🌙\n\nNow, send this Magic Link to your partner.\n` +
-        `When they click it, you will be automatically connected.\n\n` +
+        `When they click it, your menu will appear automatically.\n\n` +
         `🔗 ${link}`
     );
-
-    ctx.reply("Here is your control panel (It will become active once they join):", menu);
 }
 
 // --- COMMUNICATION LOGIC ---
@@ -145,7 +142,7 @@ const notifyPartner = async (ctx, message, extraOptions = {}) => {
         });
 };
 
-// --- SPOONIE ACTIONS (With Names) ---
+// --- SPOONIE ACTIONS ---
 bot.action('status_green', (ctx) => {
     const name = ctx.from.first_name;
     notifyPartner(ctx, `🟢 *${name}'s Energy Update:* \nFeeling good! Ready to chat.`);
@@ -166,7 +163,7 @@ bot.action('mode_dark', (ctx) => {
     notifyPartner(ctx, `🌙 *${name} is in Dark Room Mode:* \nLight sensitive. Please send voice notes only.`);
 });
 
-// --- SUPPORTER ACTIONS (With Names) ---
+// --- SUPPORTER ACTIONS ---
 bot.action('send_heart', (ctx) => {
     const name = ctx.from.first_name;
     notifyPartner(ctx, `❤️ *${name} is thinking of you.* (No reply needed)`);
