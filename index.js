@@ -6,6 +6,22 @@ const Redis = require('ioredis');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const redis = new Redis(process.env.REDIS_URL);
 
+// --- INSTRUCTION TEXTS (The Guides) ---
+const spoonieGuide =
+    `📖 *How to use your buttons:*\n\n` +
+    `🟢 *Good Energy:* You are okay and up for chatting.\n` +
+    `🟡 *Resting:* You are tired. You prefer low interaction or quiet time.\n` +
+    `🔴 *Crash/PEM:* You need total rest. No screens/replies expected.\n` +
+    `🌙 *Dark Room:* You are light-sensitive. Partner should use Voice Notes only.`;
+
+const supporterGuide =
+    `📖 *How to use your buttons:*\n\n` +
+    `❤️/🫂 *Send Love:* Sends support without pressure to reply.\n` +
+    `❓ *Check-in:* Gently asks your partner for an energy update.\n\n` +
+    `*Interpreting their signals:*\n` +
+    `🔴 = They are crashing. Please wait for them to reach out.\n` +
+    `🌙 = They are in a dark room. Please avoid text; use voice notes.`;
+
 // --- DATABASE HELPERS ---
 async function getUser(id) {
     try {
@@ -71,17 +87,28 @@ bot.start(async (ctx) => {
             await saveUser(userId, { role: myRole, partnerId: payload, firstName });
             await saveUser(payload, { partnerId: userId });
 
-            // 1. Notify the INVITER (The one waiting) + Show THEM the menu now
+            // --- NOTIFY THE INVITER (The one who waited) ---
             const inviterMenu = (inviter.role === 'spoonie') ? spoonieMenu : supporterMenu;
-            bot.telegram.sendMessage(
-                payload,
-                `✨ *${firstName}* has connected! You are linked.\n\nHere is your control panel:`,
-                { parse_mode: 'Markdown', ...inviterMenu }
-            );
+            const inviterGuide = (inviter.role === 'spoonie') ? spoonieGuide : supporterGuide;
 
-            // 2. Notify the JOINER (You) + Show YOUR menu
-            const menu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
-            return ctx.reply(`✨ Connected! You are now linked to *${inviter.firstName}*.\n\nHere are your controls:`, { parse_mode: 'Markdown', ...menu });
+            // 1. Connection Success
+            await bot.telegram.sendMessage(payload, `✨ *${firstName}* has connected! You are linked.`, { parse_mode: 'Markdown' });
+            // 2. The Instructions
+            await bot.telegram.sendMessage(payload, inviterGuide, { parse_mode: 'Markdown' });
+            // 3. The Menu
+            await bot.telegram.sendMessage(payload, "Here is your control panel:", inviterMenu);
+
+
+            // --- NOTIFY THE JOINER (You) ---
+            const myMenu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
+            const myGuide = myRole === 'spoonie' ? spoonieGuide : supporterGuide;
+
+            // 1. Connection Success
+            await ctx.reply(`✨ Connected! You are now linked to *${inviter.firstName}*.`, { parse_mode: 'Markdown' });
+            // 2. The Instructions
+            await ctx.reply(myGuide, { parse_mode: 'Markdown' });
+            // 3. The Menu
+            return ctx.reply("Here is your control panel:", myMenu);
         }
     }
 
@@ -113,9 +140,6 @@ async function sendInviteLink(ctx) {
     const userId = ctx.from.id.toString();
     const botUsername = ctx.botInfo.username;
     const link = `https://t.me/${botUsername}?start=${userId}`;
-
-    // NO MENU HERE. We just give instructions.
-    // The menu arrives automatically when the partner joins (see CASE B above).
 
     await ctx.editMessageText(
         `Got it! 🌙\n\nNow, send this Magic Link to your partner.\n` +
