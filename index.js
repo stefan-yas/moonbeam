@@ -6,21 +6,23 @@ const Redis = require('ioredis');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const redis = new Redis(process.env.REDIS_URL);
 
-// --- INSTRUCTION TEXTS (The Guides) ---
+// --- INSTRUCTION TEXTS ---
 const spoonieGuide =
     `📖 *How to use your buttons:*\n\n` +
     `🟢 *Good Energy:* You are okay and up for chatting.\n` +
-    `🟡 *Resting:* You are tired. You prefer low interaction or quiet time.\n` +
-    `🔴 *Crash/PEM:* You need total rest. No screens/replies expected.\n` +
-    `🌙 *Dark Room:* You are light-sensitive. Partner should use Voice Notes only.`;
+    `🟡 *Resting:* You are tired. Low interaction.\n` +
+    `🔴 *Crash/PEM:* Need total rest. No screens.\n` +
+    `🌙 *Dark Room:* Light-sensitive. Voice Notes only.\n` +
+    `📝 *Send Note:* Type a custom message to your partner.`;
 
 const supporterGuide =
     `📖 *How to use your buttons:*\n\n` +
-    `❤️/🫂 *Send Love:* Sends support without pressure to reply.\n` +
-    `❓ *Check-in:* Gently asks your partner for an energy update.\n\n` +
-    `*Interpreting their signals:*\n` +
-    `🔴 = They are crashing. Please wait for them to reach out.\n` +
-    `🌙 = They are in a dark room. Please avoid text; use voice notes.`;
+    `❤️/🫂 *Send Love:* Support without pressure.\n` +
+    `❓ *Check-in:* Gently asks for an energy update.\n` +
+    `📝 *Send Note:* Type a custom positive message.\n\n` +
+    `*Interpreting signals:*\n` +
+    `🔴 = Crashing. Wait for them.\n` +
+    `🌙 = Dark room. Use voice notes.`;
 
 // --- DATABASE HELPERS ---
 async function getUser(id) {
@@ -43,76 +45,65 @@ async function saveUser(id, newData) {
     }
 }
 
-// --- MENUS ---
+// --- MENUS (Updated with Note Button) ---
 const spoonieMenu = Markup.inlineKeyboard([
     [Markup.button.callback('🟢 Good Energy', 'status_green')],
     [Markup.button.callback('🟡 Resting / Low', 'status_yellow')],
     [Markup.button.callback('🔴 Crash / PEM', 'status_red')],
-    [Markup.button.callback('🌙 Dark Room', 'mode_dark'), Markup.button.callback('❤️ Send Heart', 'send_heart')]
+    [Markup.button.callback('🌙 Dark Room', 'mode_dark'), Markup.button.callback('❤️ Send Heart', 'send_heart')],
+    [Markup.button.callback('📝 Send Positive Note', 'prompt_note')] // <--- NEW
 ]);
 
 const supporterMenu = Markup.inlineKeyboard([
     [Markup.button.callback('❤️ Thinking of You', 'send_heart'), Markup.button.callback('🫂 Big Hug', 'send_hug')],
     [Markup.button.callback('☀️ Good Morning', 'send_morning'), Markup.button.callback('🌙 Good Night', 'send_night')],
-    [Markup.button.callback('❓ Gentle Status Check', 'req_checkin')]
+    [Markup.button.callback('❓ Gentle Status Check', 'req_checkin')],
+    [Markup.button.callback('📝 Send Positive Note', 'prompt_note')] // <--- NEW
 ]);
 
 // --- ONBOARDING FLOW ---
-
 bot.start(async (ctx) => {
     const userId = ctx.from.id.toString();
     const firstName = ctx.from.first_name || 'Partner';
     const payload = ctx.startPayload;
 
-    // Always update name
     await saveUser(userId, { firstName });
-
-    // 1. Get current user data
     const user = await getUser(userId);
 
-    // CASE A: User is already registered & paired -> Show Menu
+    // CASE A: Already registered
     if (user && user.partnerId) {
         const menu = user.role === 'spoonie' ? spoonieMenu : supporterMenu;
         return ctx.reply(`Welcome back, ${user.firstName}. 🌙`, menu);
     }
 
-    // CASE B: User is joining via Magic Link (The "Joiner")
+    // CASE B: Joining via Link
     if (payload && payload !== userId) {
         const inviter = await getUser(payload);
-
         if (inviter) {
             const myRole = (inviter.role === 'spoonie') ? 'supporter' : 'spoonie';
 
-            // Link them in Redis
             await saveUser(userId, { role: myRole, partnerId: payload, firstName });
             await saveUser(payload, { partnerId: userId });
 
-            // --- NOTIFY THE INVITER (The one who waited) ---
+            // Notify Inviter
             const inviterMenu = (inviter.role === 'spoonie') ? spoonieMenu : supporterMenu;
             const inviterGuide = (inviter.role === 'spoonie') ? spoonieGuide : supporterGuide;
 
-            // 1. Connection Success
-            await bot.telegram.sendMessage(payload, `✨ *${firstName}* has connected! You are linked.`, { parse_mode: 'Markdown' });
-            // 2. The Instructions
+            await bot.telegram.sendMessage(payload, `✨ *${firstName}* has connected!`, { parse_mode: 'Markdown' });
             await bot.telegram.sendMessage(payload, inviterGuide, { parse_mode: 'Markdown' });
-            // 3. The Menu
             await bot.telegram.sendMessage(payload, "Here is your control panel:", inviterMenu);
 
-
-            // --- NOTIFY THE JOINER (You) ---
+            // Notify Joiner
             const myMenu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
             const myGuide = myRole === 'spoonie' ? spoonieGuide : supporterGuide;
 
-            // 1. Connection Success
-            await ctx.reply(`✨ Connected! You are now linked to *${inviter.firstName}*.`, { parse_mode: 'Markdown' });
-            // 2. The Instructions
+            await ctx.reply(`✨ Connected to *${inviter.firstName}*.`, { parse_mode: 'Markdown' });
             await ctx.reply(myGuide, { parse_mode: 'Markdown' });
-            // 3. The Menu
             return ctx.reply("Here is your control panel:", myMenu);
         }
     }
 
-    // CASE C: New User (The "Initiator") -> Ask Role
+    // CASE C: New User
     ctx.reply(
         `Hi ${firstName}, welcome to Moonbeam. 🌙\n\nTo tailor the experience, please tell me: \nDo you live with ME/CFS, or are you the supporter?`,
         Markup.inlineKeyboard([
@@ -123,7 +114,6 @@ bot.start(async (ctx) => {
 });
 
 // --- ROLE HANDLERS ---
-
 bot.action('set_role_spoonie', async (ctx) => {
     const userId = ctx.from.id.toString();
     await saveUser(userId, { role: 'spoonie' });
@@ -140,7 +130,6 @@ async function sendInviteLink(ctx) {
     const userId = ctx.from.id.toString();
     const botUsername = ctx.botInfo.username;
     const link = `https://t.me/${botUsername}?start=${userId}`;
-
     await ctx.editMessageText(
         `Got it! 🌙\n\nNow, send this Magic Link to your partner.\n` +
         `When they click it, your menu will appear automatically.\n\n` +
@@ -149,13 +138,12 @@ async function sendInviteLink(ctx) {
 }
 
 // --- COMMUNICATION LOGIC ---
-
 const notifyPartner = async (ctx, message, extraOptions = {}) => {
     const userId = ctx.from.id.toString();
     const user = await getUser(userId);
 
     if (!user || !user.partnerId) {
-        return ctx.reply("⚠️ You aren't connected yet. Type /start to get your link.");
+        return ctx.reply("⚠️ You aren't connected yet. Type /start.");
     }
 
     bot.telegram.sendMessage(user.partnerId, message, { parse_mode: 'Markdown', ...extraOptions })
@@ -166,68 +154,69 @@ const notifyPartner = async (ctx, message, extraOptions = {}) => {
         });
 };
 
-// --- SPOONIE ACTIONS ---
-bot.action('status_green', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🟢 *${name}'s Energy Update:* \nFeeling good! Ready to chat.`);
-});
+// --- STANDARD ACTIONS ---
+bot.action('status_green', (ctx) => notifyPartner(ctx, `🟢 *${ctx.from.first_name}'s Energy Update:* \nFeeling good! Ready to chat.`));
+bot.action('status_yellow', (ctx) => notifyPartner(ctx, `🟡 *${ctx.from.first_name}'s Energy Update:* \nResting. Low interaction only.`));
+bot.action('status_red', (ctx) => notifyPartner(ctx, `🔴 *${ctx.from.first_name}'s Energy Update:* \nIn a Crash/PEM. No screens. I will reach out when I can.`));
+bot.action('mode_dark', (ctx) => notifyPartner(ctx, `🌙 *${ctx.from.first_name} is in Dark Room Mode:* \nLight sensitive. Please send voice notes only.`));
 
-bot.action('status_yellow', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🟡 *${name}'s Energy Update:* \nResting. Low interaction only.`);
-});
+bot.action('send_heart', (ctx) => notifyPartner(ctx, `❤️ *${ctx.from.first_name} is thinking of you.* (No reply needed)`));
+bot.action('send_hug', (ctx) => notifyPartner(ctx, `🫂 *${ctx.from.first_name} is sending a warm, gentle hug.*`));
+bot.action('send_morning', (ctx) => notifyPartner(ctx, `☀️ *Good morning from ${ctx.from.first_name}.* I hope you rested well.`));
+bot.action('send_night', (ctx) => notifyPartner(ctx, `🌙 *Good night from ${ctx.from.first_name}.* Sleep well and recharge.`));
 
-bot.action('status_red', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🔴 *${name}'s Energy Update:* \nIn a Crash/PEM. No screens. I will reach out when I can.`);
-});
-
-bot.action('mode_dark', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🌙 *${name} is in Dark Room Mode:* \nLight sensitive. Please send voice notes only.`);
-});
-
-// --- SUPPORTER ACTIONS ---
-bot.action('send_heart', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `❤️ *${name} is thinking of you.* (No reply needed)`);
-});
-
-bot.action('send_hug', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🫂 *${name} is sending a warm, gentle hug.*`);
-});
-
-bot.action('send_morning', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `☀️ *Good morning from ${name}.* I hope you rested well.`);
-});
-
-bot.action('send_night', (ctx) => {
-    const name = ctx.from.first_name;
-    notifyPartner(ctx, `🌙 *Good night from ${name}.* Sleep well and recharge.`);
-});
-
-// The "Smart Check-in"
 bot.action('req_checkin', async (ctx) => {
     const userId = ctx.from.id.toString();
     const name = ctx.from.first_name;
     const user = await getUser(userId);
-
-    if (!user || !user.partnerId) {
-        return ctx.reply("⚠️ Not connected yet.");
-    }
+    if (!user || !user.partnerId) return ctx.reply("⚠️ Not connected yet.");
 
     ctx.answerCbQuery("Check-in sent! 🌙");
-
     bot.telegram.sendMessage(
         user.partnerId,
         `❓ *Gentle Check-in from ${name}:* \nHow is your energy envelope right now? \n(Tap below when you can)`,
-        {
-            parse_mode: 'Markdown',
-            ...spoonieMenu
-        }
+        { parse_mode: 'Markdown', ...spoonieMenu }
     ).catch(err => console.log("Failed to reach partner", err));
+});
+
+// --- CUSTOM NOTE FEATURE ---
+
+// 1. Handle the "Send Note" button click
+bot.action('prompt_note', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    // Set a "flag" in Redis that this user is typing a note
+    await redis.set(`chatState:${userId}`, 'waiting_for_note');
+
+    ctx.reply("📝 Type your positive note now, and I will deliver it...");
+    ctx.answerCbQuery();
+});
+
+// 2. Listen for text messages
+bot.on('text', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const state = await redis.get(`chatState:${userId}`);
+
+    // Only process if we were explicitly waiting for a note
+    if (state === 'waiting_for_note') {
+        const user = await getUser(userId);
+        const name = ctx.from.first_name;
+        const noteText = ctx.message.text;
+
+        if (user && user.partnerId) {
+            // Send the note to the partner
+            await bot.telegram.sendMessage(
+                user.partnerId,
+                `💌 *New Note from ${name}:*\n\n"${noteText}"`,
+                { parse_mode: 'Markdown' }
+            );
+
+            // Confirm to sender and clear state
+            await ctx.reply("✨ Note sent!");
+            await redis.del(`chatState:${userId}`); // Clear the state so normal chatting doesn't trigger this
+        } else {
+            ctx.reply("⚠️ Error: Not connected to a partner.");
+        }
+    }
 });
 
 // --- STARTUP ---
@@ -235,6 +224,5 @@ bot.launch().then(() => {
     console.log("Moonbeam (Pro/Redis) is running...");
 });
 
-// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
