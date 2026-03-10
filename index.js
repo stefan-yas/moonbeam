@@ -1,5 +1,8 @@
 require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
+const {
+    Telegraf,
+    Markup
+} = require('telegraf');
 const Redis = require('ioredis');
 
 // --- CONFIGURATION ---
@@ -38,27 +41,38 @@ async function getUser(id) {
 async function saveUser(id, newData) {
     try {
         const current = await getUser(id) || {};
-        const updated = { ...current, ...newData };
+        const updated = {
+            ...current,
+            ...newData
+        };
         await redis.set(`user:${id}`, JSON.stringify(updated));
     } catch (err) {
         console.error("Redis Save Error:", err);
     }
 }
 
-// --- MENUS (Updated with Note Button) ---
-const spoonieMenu = Markup.inlineKeyboard([
-    [Markup.button.callback('🟢 Good Energy', 'status_green')],
-    [Markup.button.callback('🟡 Resting / Low', 'status_yellow')],
-    [Markup.button.callback('🔴 Crash / PEM', 'status_red')],
-    [Markup.button.callback('🌙 Dark Room', 'mode_dark'), Markup.button.callback('❤️ Send Heart', 'send_heart')],
-    [Markup.button.callback('📝 Send Positive Note', 'prompt_note')] // <--- NEW
-]);
+// --- MENUS ---
 
+// Dynamic Spoonie Menu
+const getSpoonieMenu = (activeStatus = null) => {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback(activeStatus === 'status_green' ? '✅ 🟢 Good Energy' : '🟢 Good Energy', 'status_green')],
+        [Markup.button.callback(activeStatus === 'status_yellow' ? '✅ 🟡 Resting / Low' : '🟡 Resting / Low', 'status_yellow')],
+        [Markup.button.callback(activeStatus === 'status_red' ? '✅ 🔴 Crash / PEM' : '🔴 Crash / PEM', 'status_red')],
+        [
+            Markup.button.callback(activeStatus === 'mode_dark' ? '✅ 🌙 Dark Room' : '🌙 Dark Room', 'mode_dark'),
+            Markup.button.callback('❤️ Send Heart', 'send_heart')
+        ],
+        [Markup.button.callback('📝 Send Positive Note', 'prompt_note')]
+    ]);
+};
+
+// Static Supporter Menu
 const supporterMenu = Markup.inlineKeyboard([
     [Markup.button.callback('❤️ Thinking of You', 'send_heart'), Markup.button.callback('🫂 Big Hug', 'send_hug')],
     [Markup.button.callback('☀️ Good Morning', 'send_morning'), Markup.button.callback('🌙 Good Night', 'send_night')],
     [Markup.button.callback('❓ Gentle Status Check', 'req_checkin')],
-    [Markup.button.callback('📝 Send Positive Note', 'prompt_note')] // <--- NEW
+    [Markup.button.callback('📝 Send Positive Note', 'prompt_note')]
 ]);
 
 // --- ONBOARDING FLOW ---
@@ -67,12 +81,14 @@ bot.start(async (ctx) => {
     const firstName = ctx.from.first_name || 'Partner';
     const payload = ctx.startPayload;
 
-    await saveUser(userId, { firstName });
+    await saveUser(userId, {
+        firstName
+    });
     const user = await getUser(userId);
 
     // CASE A: Already registered
     if (user && user.partnerId) {
-        const menu = user.role === 'spoonie' ? spoonieMenu : supporterMenu;
+        const menu = user.role === 'spoonie' ? getSpoonieMenu(user.currentStatus) : supporterMenu;
         return ctx.reply(`Welcome back, ${user.firstName}. 🌙`, menu);
     }
 
@@ -82,23 +98,37 @@ bot.start(async (ctx) => {
         if (inviter) {
             const myRole = (inviter.role === 'spoonie') ? 'supporter' : 'spoonie';
 
-            await saveUser(userId, { role: myRole, partnerId: payload, firstName });
-            await saveUser(payload, { partnerId: userId });
+            await saveUser(userId, {
+                role: myRole,
+                partnerId: payload,
+                firstName
+            });
+            await saveUser(payload, {
+                partnerId: userId
+            });
 
             // Notify Inviter
-            const inviterMenu = (inviter.role === 'spoonie') ? spoonieMenu : supporterMenu;
+            const inviterMenu = (inviter.role === 'spoonie') ? getSpoonieMenu(inviter.currentStatus) : supporterMenu;
             const inviterGuide = (inviter.role === 'spoonie') ? spoonieGuide : supporterGuide;
 
-            await bot.telegram.sendMessage(payload, `✨ *${firstName}* has connected!`, { parse_mode: 'Markdown' });
-            await bot.telegram.sendMessage(payload, inviterGuide, { parse_mode: 'Markdown' });
+            await bot.telegram.sendMessage(payload, `✨ *${firstName}* has connected!`, {
+                parse_mode: 'Markdown'
+            });
+            await bot.telegram.sendMessage(payload, inviterGuide, {
+                parse_mode: 'Markdown'
+            });
             await bot.telegram.sendMessage(payload, "Here is your control panel:", inviterMenu);
 
             // Notify Joiner
-            const myMenu = myRole === 'spoonie' ? spoonieMenu : supporterMenu;
+            const myMenu = myRole === 'spoonie' ? getSpoonieMenu() : supporterMenu;
             const myGuide = myRole === 'spoonie' ? spoonieGuide : supporterGuide;
 
-            await ctx.reply(`✨ Connected to *${inviter.firstName}*.`, { parse_mode: 'Markdown' });
-            await ctx.reply(myGuide, { parse_mode: 'Markdown' });
+            await ctx.reply(`✨ Connected to *${inviter.firstName}*.`, {
+                parse_mode: 'Markdown'
+            });
+            await ctx.reply(myGuide, {
+                parse_mode: 'Markdown'
+            });
             return ctx.reply("Here is your control panel:", myMenu);
         }
     }
@@ -116,13 +146,17 @@ bot.start(async (ctx) => {
 // --- ROLE HANDLERS ---
 bot.action('set_role_spoonie', async (ctx) => {
     const userId = ctx.from.id.toString();
-    await saveUser(userId, { role: 'spoonie' });
+    await saveUser(userId, {
+        role: 'spoonie'
+    });
     sendInviteLink(ctx);
 });
 
 bot.action('set_role_supporter', async (ctx) => {
     const userId = ctx.from.id.toString();
-    await saveUser(userId, { role: 'supporter' });
+    await saveUser(userId, {
+        role: 'supporter'
+    });
     sendInviteLink(ctx);
 });
 
@@ -146,7 +180,10 @@ const notifyPartner = async (ctx, message, extraOptions = {}) => {
         return ctx.reply("⚠️ You aren't connected yet. Type /start.");
     }
 
-    bot.telegram.sendMessage(user.partnerId, message, { parse_mode: 'Markdown', ...extraOptions })
+    bot.telegram.sendMessage(user.partnerId, message, {
+            parse_mode: 'Markdown',
+            ...extraOptions
+        })
         .then(() => ctx.answerCbQuery("Sent! 🌙"))
         .catch((err) => {
             console.error(err);
@@ -154,11 +191,34 @@ const notifyPartner = async (ctx, message, extraOptions = {}) => {
         });
 };
 
+// --- DYNAMIC STATUS HANDLER ---
+const handleStatusUpdate = async (ctx, statusKey, statusMessage) => {
+    const userId = ctx.from.id.toString();
+
+    // Save the new active status
+    await saveUser(userId, {
+        currentStatus: statusKey
+    });
+
+    // Update the visual menu to show the checkmark
+    try {
+        await ctx.editMessageReplyMarkup(getSpoonieMenu(statusKey).reply_markup);
+    } catch (err) {
+        // Telegram throws an error if we try to edit the menu with the exact same data.
+        if (!err.description || !err.description.includes('message is not modified')) {
+            console.error("Error editing menu:", err);
+        }
+    }
+
+    // Send the notification
+    await notifyPartner(ctx, statusMessage);
+};
+
 // --- STANDARD ACTIONS ---
-bot.action('status_green', (ctx) => notifyPartner(ctx, `🟢 *${ctx.from.first_name}'s Energy Update:* \nFeeling good! Ready to chat.`));
-bot.action('status_yellow', (ctx) => notifyPartner(ctx, `🟡 *${ctx.from.first_name}'s Energy Update:* \nResting. Low interaction only.`));
-bot.action('status_red', (ctx) => notifyPartner(ctx, `🔴 *${ctx.from.first_name}'s Energy Update:* \nIn a Crash/PEM. No screens. I will reach out when I can.`));
-bot.action('mode_dark', (ctx) => notifyPartner(ctx, `🌙 *${ctx.from.first_name} is in Dark Room Mode:* \nLight sensitive. Please send voice notes only.`));
+bot.action('status_green', (ctx) => handleStatusUpdate(ctx, 'status_green', `🟢 *${ctx.from.first_name}'s Energy Update:* \nFeeling good! Ready to chat.`));
+bot.action('status_yellow', (ctx) => handleStatusUpdate(ctx, 'status_yellow', `🟡 *${ctx.from.first_name}'s Energy Update:* \nResting. Low interaction only.`));
+bot.action('status_red', (ctx) => handleStatusUpdate(ctx, 'status_red', `🔴 *${ctx.from.first_name}'s Energy Update:* \nIn a Crash/PEM. No screens. I will reach out when I can.`));
+bot.action('mode_dark', (ctx) => handleStatusUpdate(ctx, 'mode_dark', `🌙 *${ctx.from.first_name} is in Dark Room Mode:* \nLight sensitive. Please send voice notes only.`));
 
 bot.action('send_heart', (ctx) => notifyPartner(ctx, `❤️ *${ctx.from.first_name} is thinking of you.* (No reply needed)`));
 bot.action('send_hug', (ctx) => notifyPartner(ctx, `🫂 *${ctx.from.first_name} is sending a warm, gentle hug.*`));
@@ -171,48 +231,48 @@ bot.action('req_checkin', async (ctx) => {
     const user = await getUser(userId);
     if (!user || !user.partnerId) return ctx.reply("⚠️ Not connected yet.");
 
+    // Retrieve partner's current status so the check-in menu reflects it
+    const spoonieUser = await getUser(user.partnerId);
+    const activeStatus = spoonieUser ? spoonieUser.currentStatus : null;
+
     ctx.answerCbQuery("Check-in sent! 🌙");
     bot.telegram.sendMessage(
         user.partnerId,
-        `❓ *Gentle Check-in from ${name}:* \nHow is your energy envelope right now? \n(Tap below when you can)`,
-        { parse_mode: 'Markdown', ...spoonieMenu }
+        `❓ *Gentle Check-in from ${name}:* \nHow is your energy envelope right now? \n(Tap below when you can)`, {
+            parse_mode: 'Markdown',
+            ...getSpoonieMenu(activeStatus)
+        }
     ).catch(err => console.log("Failed to reach partner", err));
 });
 
 // --- CUSTOM NOTE FEATURE ---
-
-// 1. Handle the "Send Note" button click
 bot.action('prompt_note', async (ctx) => {
     const userId = ctx.from.id.toString();
-    // Set a "flag" in Redis that this user is typing a note
     await redis.set(`chatState:${userId}`, 'waiting_for_note');
 
     ctx.reply("📝 Type your positive note now, and I will deliver it...");
     ctx.answerCbQuery();
 });
 
-// 2. Listen for text messages
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id.toString();
     const state = await redis.get(`chatState:${userId}`);
 
-    // Only process if we were explicitly waiting for a note
     if (state === 'waiting_for_note') {
         const user = await getUser(userId);
         const name = ctx.from.first_name;
         const noteText = ctx.message.text;
 
         if (user && user.partnerId) {
-            // Send the note to the partner
             await bot.telegram.sendMessage(
                 user.partnerId,
-                `💌 *New Note from ${name}:*\n\n"${noteText}"`,
-                { parse_mode: 'Markdown' }
+                `💌 *New Note from ${name}:*\n\n"${noteText}"`, {
+                    parse_mode: 'Markdown'
+                }
             );
 
-            // Confirm to sender and clear state
             await ctx.reply("✨ Note sent!");
-            await redis.del(`chatState:${userId}`); // Clear the state so normal chatting doesn't trigger this
+            await redis.del(`chatState:${userId}`);
         } else {
             ctx.reply("⚠️ Error: Not connected to a partner.");
         }
